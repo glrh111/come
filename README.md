@@ -11,4 +11,4 @@
 ](https://github.com/glrh111/come)
 
 Come is an not open source programming language that makes it easy to build simple,
-reliable, and efficient software, and it using Golang runtime.
+reliable, and efficient software, and it uses Golang runtime.
