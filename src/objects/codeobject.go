@@ -4,12 +4,13 @@ type ComeCodeObject struct {
 	Names  []string
 	Types  []*ComeTypeObject
 	Consts []ComeObjecter  // 里边存储了不会变类型的值
-	Ops    []ComeOpType  // 指令
+	Ops    [][]int  // []int 表示一条指令，[]int[0]表示指令代码，其后表示参数
 }
 
-func (co *ComeCodeObject) AddName(name string, typ *ComeTypeObject) {
+func (co *ComeCodeObject) AddName(name string, typ *ComeTypeObject) int {
 	co.Names = append(co.Names, name)
 	co.Types = append(co.Types, typ)
+	return len(co.Names) - 1
 }
 
 func (co *ComeCodeObject) GetTypeByIndex(index int) *ComeTypeObject {
@@ -34,18 +35,19 @@ func (co *ComeCodeObject) FindConstIndex(o ComeObjecter) int {
 	return -1
 }
 
-func (co *ComeCodeObject) AddConst(cons ComeObjecter) {
+func (co *ComeCodeObject) AddConst(cons ComeObjecter) int {
 	co.Consts = append(co.Consts, cons)
+	return len(co.Consts) - 1
 }
 
-func (co *ComeCodeObject) AddOp(op ComeOpType) {
+func (co *ComeCodeObject) AddOp(op...int) {
 	co.Ops = append(co.Ops, op)
 }
 
 type ComeOpType int
 
 const (
-	ComeOp_LoadConst ComeOpType = iota
+	ComeOp_LoadConst = iota
 	ComeOp_StoreName
 	ComeOp_LoadName
 
@@ -53,10 +55,13 @@ const (
 	ComeOp_Sub
 	ComeOp_Multi
 	ComeOp_Divide
+
+	ComeOp_Print
+	ComeOp_PrintNewLine
 )
 
 var (
-	ComeComputationStringToOp = map[string]ComeOpType{
+	ComeComputationStringToOp = map[string]int{
 		"+": ComeOp_Add,
 		"-": ComeOp_Sub,
 		"*": ComeOp_Multi,
@@ -69,6 +74,6 @@ func NewComeCodeObject() *ComeCodeObject {
 		Names:  []string{},
 		Types:  []*ComeTypeObject{},
 		Consts: []ComeObjecter{},
-		Ops:    []ComeOpType{},
+		Ops:    [][]int{},
 	}
 }

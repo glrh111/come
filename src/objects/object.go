@@ -1,7 +1,10 @@
 package objects
 
+import "fmt"
+
 type ComeObjecter interface {
 	Type() *ComeTypeObject
+	fmt.Stringer
 }
 
 

@@ -13,6 +13,7 @@ import (
 const (
 	LineSeparator = "\n"
 	CommentSign = "--"
+	StringSeparator = "\""
 
 
 )
@@ -25,18 +26,25 @@ var (
 	MatchRegex_Assignment = regexp.MustCompile(`(?P<varName>\S+)\s*=(?P<varValue>\S+)\s*;`)
 	MatchRegex_Compute = regexp.MustCompile(`(?P<varName>\S+)\s*=\s*(?P<varName1>\S+)\s*(?P<op>[+|-|*|/])\s*(?P<varName2>\S+)\s;`)
 	MatchRegex_Print = regexp.MustCompile(`print\(\s*(?P<varName>\S+)\s*\)\s*;`)
-)
 
-var testSrcCode = `
--- testSrcCode 注释 先声明，再赋值
+	TestSrcCode = `
+-- comelang 的第一个程序
 int a;
 a = 5;
+
 int b;
 b = 6;
+
 int c;
 c = a + b;
+
 print(c);
+
+string d;
+d = "hello, world!";
+print(d);
 `
+)
 
 type matchDeclarationResult struct {
 	Type *objects.ComeTypeObject
@@ -52,7 +60,7 @@ type matchComputationResult struct {
 	leftVarName string
 	rightVarName1 string
 	rightVarName2 string
-	op objects.ComeOpType  // op
+	op int  // op
 }
 
 type matchPrintResult struct {
@@ -78,22 +86,34 @@ func matchDeclaration(line string) (*matchDeclarationResult, bool) {
 
 // a = 1
 func matchAssignment(line string) (*matchAssignmentResult, bool) {
-	strs := strings.Fields(line);
-	if len(strs) != 3 && strs[1] != "=" {
-		return nil, false
+	if strings.Contains(line, StringSeparator) { // b = "hello, world!"
+		strs := strings.Split(line, "=")
+		if len(strs) != 2 {
+			return nil, false
+		}
+		s := strings.TrimSpace(strs[1])
+		s = s[1:len(s)-1]
+		return &matchAssignmentResult{
+			VarName: strings.TrimSpace(strs[0]),
+			ValueInString: s,
+		}, true
+	} else { // a = 1
+		strs := strings.Fields(line)
+		if !(len(strs) == 3 && strs[1] == "=") {
+			return nil, false
+		}
+		return &matchAssignmentResult{
+			VarName: strs[0],
+			ValueInString: strs[2],
+		}, true
 	}
-
-	return &matchAssignmentResult{
-		VarName: strs[0],
-		ValueInString: strs[2],
-	}, true
 }
 
 // 0 1 2 3 4
 // c = a + b
 func matchComputation(line string) (*matchComputationResult, bool) {
 	strs := strings.Fields(line);
-	if len(strs) != 5 && strs[1] != "=" {
+	if !(len(strs) == 5 && strs[1] == "=") {
 		return nil, false
 	}
 
@@ -119,7 +139,7 @@ func matchPrint(line string) (*matchPrintResult, bool) {
 	}, true
 }
 
-func Compiler(f io.Reader) *objects.ComeCodeObject {
+func Compile(f io.Reader) *objects.ComeCodeObject {
 	// 读取line
 	bs, err := ioutil.ReadAll(f)
 	if err != nil {
@@ -127,13 +147,13 @@ func Compiler(f io.Reader) *objects.ComeCodeObject {
 	}
 	var (
 		lines = strings.Split(string(bs), LineSeparator)
-		lineNo = 1
 		co = objects.NewComeCodeObject()
 	)
-	for _, line := range lines {
+	for lineNo, line := range lines {
+		lineNo += 1
 		line = strings.TrimSpace(line)
 		if len(line) >= 2 && line[:2] == CommentSign {
-			continue
+			goto innerend
 		}
 		if len(line) >= 1 {
 			if line[len(line)-1] != ';' {
@@ -142,26 +162,29 @@ func Compiler(f io.Reader) *objects.ComeCodeObject {
 				)
 			}
 		} else {
-			continue
+			goto innerend
 		}
 		line = line[:len(line)-1] // 去除 ;
 
-		lineNo += 1
+
 		if md, ok := matchDeclaration(line); ok {
 			// check
 			nameIndex := co.FindNameIndex(md.VarName)
 			if nameIndex >= 0 {
-				panic(fmt.Sprintf("redeclaration line[%v] var[%v]", lineNo-1, md.VarName))
+				panic(fmt.Sprintf("redeclaration line[%v] var[%v]", lineNo, md.VarName))
 			}
 			// add to
 			co.AddName(md.VarName, md.Type)
-			continue
+			goto innerend
 		}
+		// a = 1
+		// LOAD_CONST const_index
+		// STORE_NAME name_index
 		if ma, ok := matchAssignment(line); ok {
-			// check if declaration
+			// check if declared
 			nameIndex := co.FindNameIndex(ma.VarName)
 			if nameIndex < 0 {
-				panic(fmt.Sprintf("assign before declaration line[%v] var[%v]", lineNo-1, ma.VarName))
+				panic(fmt.Sprintf("assign before declaration line[%v] var[%v]", lineNo, ma.VarName))
 			}
 			var (
 				value objects.ComeObjecter
@@ -171,37 +194,68 @@ func Compiler(f io.Reader) *objects.ComeCodeObject {
 			case objects.ComeIntType:
 				v, err := strconv.Atoi(ma.ValueInString)
 				if err != nil {
-					panic(fmt.Sprintf("not int value [%v] line [%v]", ma.ValueInString, lineNo-1))
+					panic(fmt.Sprintf("not int value [%v] line [%v]", ma.ValueInString, lineNo))
 				}
 				value = objects.NewComeIntObject(v)
 			case objects.ComeStringType:
 				value = objects.NewComeStringObject(ma.ValueInString)
 			default:
-				panic(fmt.Sprintf("unknown value [%v] line [%v]", ma.ValueInString, lineNo-1))
+				panic(fmt.Sprintf("unknown value [%v] line [%v]", ma.ValueInString, lineNo))
 			}
 			// check value
 			valueIndex := co.FindConstIndex(value)
 			if valueIndex < 0 { // add to const
-				co.AddConst(value)
+				valueIndex = co.AddConst(value)
 			}
-			// op code TODO 加入参数
-			co.AddOp(objects.ComeOp_LoadConst)
-			co.AddOp(objects.ComeOp_StoreName)
-			continue
+			// op code
+			co.AddOp(objects.ComeOp_LoadConst, valueIndex)
+			co.AddOp(objects.ComeOp_StoreName, nameIndex)
+			goto innerend
 		}
-		//if mc, ok := matchComputation(line); ok {
-		//
-		//	continue
-		//}
-		//if mp, ok := matchPrint(line); ok {
-		//
-		//	continue
-		//}
+		// c = a + b
+		// LOAD_NAME name_a_index
+		// LOAD_NAME name_b_index
+		// ADD
+		// STORE_NAME name_c_index
+		if mc, ok := matchComputation(line); ok {
+			var (
+				nameIndex1 = co.FindNameIndex(mc.leftVarName)
+				nameIndex2 = co.FindNameIndex(mc.rightVarName1)
+				nameIndex3 = co.FindNameIndex(mc.rightVarName2)
+			)
+
+			// check if a, b, c declared
+			for _, nameIndex := range []int{nameIndex1, nameIndex2, nameIndex3} {
+				if nameIndex < 0 {
+					panic(fmt.Sprintf("undeclared line [%v]", lineNo))
+				}
+			}
+			// load name
+			co.AddOp(objects.ComeOp_LoadName, nameIndex2)
+			co.AddOp(objects.ComeOp_LoadName, nameIndex3)
+			co.AddOp(mc.op)
+			co.AddOp(objects.ComeOp_StoreName, nameIndex1)
+			goto innerend
+		}
+		// print(a)
+		// LOAD_NAME name_index
+		// PRINT
+		// PRINT_NEWLINE
+		if mp, ok := matchPrint(line); ok {
+			nameIndex := co.FindNameIndex(mp.VarName)
+			if nameIndex < 0 {
+				panic(fmt.Sprintf("undeclared name [%v] line [%v]", mp.VarName, lineNo))
+			}
+			co.AddOp(objects.ComeOp_LoadName, nameIndex)
+			co.AddOp(objects.ComeOp_Print)
+			co.AddOp(objects.ComeOp_PrintNewLine)
+			goto innerend
+		}
 
 		panic(
 			fmt.Sprintf("unrecognized line [%v]", lineNo),
 		)
-
+innerend:
 	}
-	return nil
+	return co
 }
